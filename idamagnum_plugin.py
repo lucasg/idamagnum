@@ -1,22 +1,40 @@
 import json
-from urllib2 import urlopen
 
+try:
+    # Python2
+    from urllib2 import urlopen
+except ImportError:
+    # Python3
+    from urllib.request import urlopen
+
+import idc
 import idaapi
 import idautils
 from idaapi import plugin_t
 
 
-class ChooseMagicNumber(idaapi.Choose2):
+try:
+    # ida < 7.4
+    from idaapi import Choose2 as Choose
+    from idc import OpEnumEx as op_enum
+except ImportError:
+    # ida 7.4
+    from ida_kernwin import Choose
+    from idc import op_enum
+
+
+
+class ChooseMagicNumber(Choose):
     
     def __init__(self,value,results):
 
-        idaapi.Choose2.__init__(self,
+        Choose.__init__(self,
             "[IdaMagnum] Select enum from MagnumDB.com for value : 0x%X" % value,
-            [ ["name",   13 | idaapi.Choose2.CHCOL_PLAIN], 
-              ["value",  10 | idaapi.Choose2.CHCOL_HEX],
-              ["source",  13 | idaapi.Choose2.CHCOL_PLAIN],
+            [ ["name",   13 | Choose.CHCOL_PLAIN], 
+              ["value",  10 | Choose.CHCOL_HEX],
+              ["source",  13 | Choose.CHCOL_PLAIN],
             ],
-            idaapi.Choose2.CH_MODAL
+            Choose.CH_MODAL
         )
 
         self._results = results
@@ -104,13 +122,21 @@ class SearchMagicNumber(idaapi.action_handler_t):
 
         # locate the operand where to apply the enum
         insn = idautils.DecodeInstruction(ctx.cur_ea)
-        for op in filter(lambda o: o.type == idaapi.o_imm,insn.Operands):
+        
+        try:
+            # ida < 7.4
+            operands = insn.Operands
+        except AttributeError:
+            # ida 7.4
+            operands = insn.ops
+
+        for op in filter(lambda o: o.type == idaapi.o_imm,operands):
 
             # heuristic : the selected immediate is the first in the instruction with 
             # the same exact value (we are using a mask since IDA loves to set FFFFFFFF to high words)
             if op.value & selected_value_mask == selected_value:
                 # Apply the enum
-                idc.OpEnumEx(ctx.cur_ea, op.n, idaapi.get_enum("_IDA_MAGNUMDB"), serial)
+                op_enum(ctx.cur_ea, op.n, idaapi.get_enum("_IDA_MAGNUMDB"), serial)
                 break
 
         return 1
@@ -186,6 +212,10 @@ class IdaMagnumManager(object):
     def add_magnumdb_entry(self, name, value):
          
         enum_id = self.ensure_magnumdb_enum_type()
+
+        # idaapi.add_enum_member accept only str (Py3)
+        if type(name) == type(b''):
+            name = name.decode('utf-8')
 
         serial = 0
         enum_memberid = idaapi.get_enum_member(enum_id, value, serial, 0)
